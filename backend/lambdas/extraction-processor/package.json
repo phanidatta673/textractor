@@ -1,0 +1,18 @@
+{
+  "name": "extraction-processor",
+  "version": "1.0.0",
+  "description": "Lambda function for extracting text from PDF, DOCX, and TXT files.",
+  "main": "index.js",
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.0.0",
+    "@aws-sdk/client-dynamodb": "^3.0.0",
+    "@aws-sdk/util-dynamodb": "^3.0.0",
+    "mammoth": "^1.6.0",
+    "pdf-parse": "^1.1.1",
+    "jszip": "^3.10.1"
+  },
+  "devDependencies": {
+    "@types/aws-lambda": "^8.10.0",
+    "@types/pdf-parse": "^1.1.1"
+  }
+}
