@@ -62,7 +62,7 @@ resource "aws_lambda_permission" "api_gw_github_issue_handler" {
 }
 
 # GitHub Webhook
-resource "aws_repository_webhook" "textractor" {
+resource "github_repository_webhook" "textractor" {
   repository = var.github_repo
 
   configuration {
