@@ -1,15 +1,20 @@
-name: Dockerized Deploy
+name: Dockerized Deploy & Infrastructure
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, feature/text-extraction-improvements ]
 
 jobs:
-  build-and-deploy:
+  terraform-and-deploy:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
         uses: actions/checkout@v3
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: 1.5.0
 
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v2
@@ -17,6 +22,18 @@ jobs:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Terraform Init & Apply
+        working-directory: ./terraform
+        env:
+          TF_VAR_github_token: ${{ secrets.GH_PAT }}
+          TF_VAR_sprites_token: ${{ secrets.SPRITES_TOKEN }}
+          TF_VAR_github_owner: "phanidatta673"
+          TF_VAR_github_repo: "textractor"
+          TF_VAR_region: ${{ secrets.AWS_REGION }}
+        run: |
+          terraform init
+          terraform apply -auto-approve
 
       - name: Login to Amazon ECR
         id: login-ecr
@@ -33,6 +50,7 @@ jobs:
           docker tag $ECR_REGISTRY/$ECR_REPOSITORY:frontend-$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:frontend-latest
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:frontend-latest
 
-      - name: Build and Update Lambdas
+      - name: Update Lambdas
         run: |
-          echo "Updating lambdas..."
+          echo "Infrastructure deployed and images pushed to ECR."
+          echo "The app is now live at the API Gateway endpoint provided by Terraform outputs."
