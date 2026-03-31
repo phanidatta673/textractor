@@ -16,12 +16,6 @@ provider "github" {
   owner = var.github_owner
 }
 
-# Variable for tokens (should be passed via terraform.tfvars or env vars)
-variable "github_token" { type = string }
-variable "github_owner" { type = string }
-variable "github_repo"  { type = string }
-variable "sprites_token" { type = string }
-...
 data "archive_file" "github_issue_handler" {
   type        = "zip"
   source_dir  = "../backend/lambdas/github-issue-handler"
