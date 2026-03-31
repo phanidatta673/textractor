@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { Upload, FileText, CheckCircle, XCircle, Loader2 } from 'lucide-react';
+import JSZip from 'jszip';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL;
 
@@ -15,6 +16,7 @@ interface FileStatus {
 
 export default function Dashboard() {
   const [files, setFiles] = useState<FileStatus[]>([]);
+  const [isZipping, setIsZipping] = useState(false);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
@@ -27,38 +29,63 @@ export default function Dashboard() {
     }
   };
 
+  const uploadFile = async (index: number, currentFiles?: FileStatus[]) => {
+    const list = currentFiles || files;
+    const fileStatus = list[index];
+    try {
+      updateFileStatus(index, { status: 'UPLOADING' });
+      const resUrl = await fetch(`${API_BASE_URL}/presigned-url`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filename: fileStatus.file.name, contentType: fileStatus.file.type })
+      });
+      const { uploadUrl, fileId, key } = await resUrl.json();
+
+      await fetch(uploadUrl, {
+        method: 'PUT',
+        body: fileStatus.file,
+        headers: { 'Content-Type': fileStatus.file.type }
+      });
+
+      updateFileStatus(index, { status: 'PROCESSING', id: fileId });
+      await fetch(`${API_BASE_URL}/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fileId, key, bucket: process.env.NEXT_PUBLIC_BUCKET_NAME })
+      });
+
+      pollStatus(index, fileId);
+    } catch (err: any) {
+      updateFileStatus(index, { status: 'FAILED', error: err.message });
+    }
+  };
+
   const processFiles = async () => {
-    for (let i = 0; i < files.length; i++) {
-      const fileStatus = files[i];
-      try {
-        // 1. Get Presigned URL
-        updateFileStatus(i, { status: 'UPLOADING' });
-        const resUrl = await fetch(`${API_BASE_URL}/presigned-url`, {
-          method: 'POST',
-          body: JSON.stringify({ filename: fileStatus.file.name, contentType: fileStatus.file.type })
-        });
-        const { uploadUrl, fileId, key } = await resUrl.json();
+    await Promise.all(files.map((_, i) => uploadFile(i)));
+  };
 
-        // 2. Upload to S3
-        await fetch(uploadUrl, {
-          method: 'PUT',
-          body: fileStatus.file,
-          headers: { 'Content-Type': fileStatus.file.type }
-        });
-
-        // 3. Start Extraction
-        updateFileStatus(i, { status: 'PROCESSING', id: fileId });
-        await fetch(`${API_BASE_URL}/start`, {
-          method: 'POST',
-          body: JSON.stringify({ fileId, key, bucket: process.env.NEXT_PUBLIC_BUCKET_NAME })
-        });
-
-        // 4. Poll for Status
-        pollStatus(i, fileId);
-
-      } catch (err: any) {
-        updateFileStatus(i, { status: 'FAILED', error: err.message });
-      }
+  const zipAndUpload = async () => {
+    if (files.length === 0) return;
+    setIsZipping(true);
+    try {
+      const zip = new JSZip();
+      files.forEach(f => zip.file(f.file.name, f.file));
+      const blob = await zip.generateAsync({ type: 'blob' });
+      const zippedFile = new File([blob], 'extracted_batch.zip', { type: 'application/zip' });
+      
+      const zipStatus: FileStatus = {
+        file: zippedFile,
+        id: '',
+        status: 'PENDING'
+      };
+      
+      setFiles([zipStatus]);
+      // Trigger upload for the new zip file
+      setTimeout(() => uploadFile(0, [zipStatus]), 100);
+    } catch (err) {
+      console.error("Zipping error", err);
+    } finally {
+      setIsZipping(false);
     }
   };
 
@@ -84,7 +111,9 @@ export default function Dashboard() {
   const updateFileStatus = (index: number, update: Partial<FileStatus>) => {
     setFiles(prev => {
       const next = [...prev];
-      next[index] = { ...next[index], ...update };
+      if (next[index]) {
+        next[index] = { ...next[index], ...update };
+      }
       return next;
     });
   };
@@ -105,12 +134,22 @@ export default function Dashboard() {
               <input type="file" className="hidden" multiple onChange={handleFileChange} accept=".pdf,.docx,.txt,.zip" />
             </label>
           </div>
-          <button 
-            onClick={processFiles}
-            className="mt-4 w-full bg-blue-600 text-white py-2 rounded-lg font-semibold hover:bg-blue-700 transition"
-          >
-            Extract Text
-          </button>
+          <div className="flex space-x-4 mt-4">
+            <button 
+              onClick={processFiles}
+              className="flex-1 bg-blue-600 text-white py-2 rounded-lg font-semibold hover:bg-blue-700 transition"
+            >
+              Upload Individually
+            </button>
+            <button 
+              onClick={zipAndUpload}
+              disabled={isZipping || files.length === 0}
+              className="flex-1 bg-gray-800 text-white py-2 rounded-lg font-semibold hover:bg-black transition flex items-center justify-center"
+            >
+              {isZipping ? <Loader2 className="animate-spin mr-2" /> : null}
+              Zip & Upload
+            </button>
+          </div>
         </div>
 
         <div className="space-y-4">
@@ -130,9 +169,12 @@ export default function Dashboard() {
                 </div>
               </div>
               {f.content && (
-                <pre className="mt-4 p-3 bg-gray-50 rounded text-xs overflow-auto max-h-40">
+                <pre className="mt-4 p-3 bg-gray-50 rounded text-xs overflow-auto max-h-40 whitespace-pre-wrap">
                   {f.content}
                 </pre>
+              )}
+              {f.error && (
+                <p className="mt-2 text-sm text-red-500 font-medium">Error: {f.error}</p>
               )}
             </div>
           ))}

@@ -4,6 +4,35 @@ import fs from 'fs';
 
 test.describe('Text Extractor Dashboard', () => {
   test.beforeEach(async ({ page }) => {
+    // Mock API responses
+    await page.route('**/presigned-url', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ uploadUrl: 'http://localhost:3000/mock-upload', fileId: '123', key: 'uploads/123.txt' }),
+      });
+    });
+
+    await page.route('**/mock-upload', async route => {
+      await route.fulfill({ status: 200 });
+    });
+
+    await page.route('**/start', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ message: 'Extraction started', fileId: '123' }),
+      });
+    });
+
+    await page.route('**/status/123', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ status: 'COMPLETED', content: 'Extracted text from mock file!' }),
+      });
+    });
+
     await page.goto('/');
   });
 
@@ -27,9 +56,8 @@ test.describe('Text Extractor Dashboard', () => {
     const extractButton = page.getByRole('button', { name: /Extract Text/i });
     await extractButton.click();
 
-    // 5. Verify status transitions (mocking API responses if necessary, or checking labels)
-    // For E2E without real backend, this might fail unless backend is deployed.
-    // If backend is NOT deployed, we should mock the API calls.
-    // However, the prompt asks for Playwright to avoid hallucination, implying real-ish flow.
+    // 5. Verify status transitions
+    await expect(page.getByText('COMPLETED')).toBeVisible({ timeout: 10000 });
+    await expect(page.getByText('Extracted text from mock file!')).toBeVisible();
   });
 });

@@ -1,5 +1,86 @@
+terraform {
+  required_providers {
+    github = {
+      source  = "integrations/github"
+      version = "~> 5.0"
+    }
+  }
+}
+
 provider "aws" {
   region = var.region
+}
+
+provider "github" {
+  token = var.github_token
+  owner = var.github_owner
+}
+
+# Variable for tokens (should be passed via terraform.tfvars or env vars)
+variable "github_token" { type = string }
+variable "github_owner" { type = string }
+variable "github_repo"  { type = string }
+variable "sprites_token" { type = string }
+...
+data "archive_file" "github_issue_handler" {
+  type        = "zip"
+  source_dir  = "../backend/lambdas/github-issue-handler"
+  output_path = "github-issue-handler.zip"
+  excludes    = ["node_modules", "package-lock.json", "index.ts"]
+}
+
+# GitHub Issue Handler Lambda
+resource "aws_lambda_function" "github_issue_handler" {
+  function_name    = "GitHubIssueHandler"
+  role             = aws_iam_role.lambda_role.arn
+  handler          = "index.handler"
+  runtime          = "nodejs18.x"
+  filename         = data.archive_file.github_issue_handler.output_path
+  source_code_hash = data.archive_file.github_issue_handler.output_base64sha256
+
+  environment {
+    variables = {
+      SPRITES_TOKEN = var.sprites_token
+      GITHUB_TOKEN  = var.github_token
+      REPO_URL      = "https://github.com/${var.github_owner}/${var.github_repo}.git"
+    }
+  }
+}
+
+# API Gateway Route for GitHub Webhook
+resource "aws_apigatewayv2_integration" "github_issue_handler" {
+  api_id           = aws_apigatewayv2_api.api.id
+  integration_type = "AWS_PROXY"
+  integration_uri  = aws_lambda_function.github_issue_handler.invoke_arn
+}
+
+resource "aws_apigatewayv2_route" "github_issue_handler" {
+  api_id    = aws_apigatewayv2_api.api.id
+  route_key = "POST /github-webhook"
+  target    = "integrations/${aws_apigatewayv2_integration.github_issue_handler.id}"
+}
+
+resource "aws_lambda_permission" "api_gw_github_issue_handler" {
+  statement_id  = "AllowExecutionFromAPIGateway"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.github_issue_handler.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_apigatewayv2_api.api.execution_arn}/*/*"
+}
+
+# GitHub Webhook
+resource "aws_repository_webhook" "textractor" {
+  repository = var.github_repo
+
+  configuration {
+    url          = "${aws_apigatewayv2_api.api.api_endpoint}/github-webhook"
+    content_type = "json"
+    insecure_ssl = false
+  }
+
+  active = true
+
+  events = ["issues"]
 }
 
 # S3 Bucket for Uploads
@@ -45,6 +126,16 @@ resource "aws_dynamodb_table" "extractions" {
   ttl {
     attribute_name = "ttl"
     enabled        = true
+  }
+}
+
+# ECR Repository for Frontend/Backend Dockerization
+resource "aws_ecr_repository" "app" {
+  name                 = "textractor-app"
+  image_tag_mutability = "MUTABLE"
+
+  image_scanning_configuration {
+    scan_on_push = true
   }
 }
 
@@ -96,7 +187,7 @@ resource "aws_iam_role_policy" "lambda_policy" {
       {
         Action = "lambda:InvokeFunction"
         Effect = "Allow"
-        Resource = "*"
+        Resource = aws_lambda_function.extraction_processor.arn
       },
       {
         Action = [
@@ -116,7 +207,7 @@ data "archive_file" "get_presigned_url" {
   type        = "zip"
   source_dir  = "../backend/lambdas/get-presigned-url"
   output_path = "get-presigned-url.zip"
-  excludes    = ["node_modules", "package-lock.json", "index.ts"] # Assuming we'd deploy the compiled JS, but for simplicity here we'll assume the source is what we have.
+  excludes    = ["node_modules", "package-lock.json", "index.ts"]
 }
 
 data "archive_file" "start_extraction" {
@@ -232,8 +323,6 @@ resource "aws_cloudwatch_log_group" "api_gw" {
 }
 
 # Routes and Integrations
-# (Adding routes for GetPresignedUrl, StartExtraction, GetStatus)
-
 resource "aws_apigatewayv2_integration" "get_presigned_url" {
   api_id           = aws_apigatewayv2_api.api.id
   integration_type = "AWS_PROXY"
