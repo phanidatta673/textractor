@@ -15,3 +15,6 @@ github_repo = "textractor"
 
 # Sprite Sandbox API Token (from sprites.dev)
 sprites_token = "YOUR_SPRITES_TOKEN"
+
+# Secret code for API authentication
+secret_code = "YOUR_SECRET_CODE"

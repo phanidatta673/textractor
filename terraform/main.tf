@@ -16,111 +16,6 @@ provider "github" {
   owner = var.github_owner
 }
 
-data "archive_file" "github_issue_handler" {
-  type        = "zip"
-  source_dir  = "../backend/lambdas/github-issue-handler/dist"
-  output_path = "github-issue-handler.zip"
-}
-
-# GitHub Issue Handler Lambda
-resource "aws_lambda_function" "github_issue_handler" {
-  function_name    = "GitHubIssueHandler"
-  role             = aws_iam_role.lambda_role.arn
-  handler          = "index.handler"
-  runtime          = "python3.11"
-  filename         = data.archive_file.github_issue_handler.output_path
-  source_code_hash = data.archive_file.github_issue_handler.output_base64sha256
-
-  environment {
-    variables = {
-      SPRITES_TOKEN = var.sprites_token
-      GITHUB_TOKEN  = var.github_token
-      REPO_URL      = "https://github.com/${var.github_owner}/${var.github_repo}.git"
-    }
-  }
-}
-
-# API Gateway Route for GitHub Webhook
-resource "aws_apigatewayv2_integration" "github_issue_handler" {
-  api_id           = aws_apigatewayv2_api.api.id
-  integration_type = "AWS_PROXY"
-  integration_uri  = aws_lambda_function.github_issue_handler.invoke_arn
-}
-
-resource "aws_apigatewayv2_route" "github_issue_handler" {
-  api_id    = aws_apigatewayv2_api.api.id
-  route_key = "POST /github-webhook"
-  target    = "integrations/${aws_apigatewayv2_integration.github_issue_handler.id}"
-}
-
-resource "aws_lambda_permission" "api_gw_github_issue_handler" {
-  statement_id  = "AllowExecutionFromAPIGateway"
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.github_issue_handler.function_name
-  principal     = "apigateway.amazonaws.com"
-  source_arn    = "${aws_apigatewayv2_api.api.execution_arn}/*/*"
-}
-
-# GitHub Webhook
-resource "github_repository_webhook" "textractor" {
-  repository = var.github_repo
-
-  configuration {
-    url          = "${aws_apigatewayv2_api.api.api_endpoint}/github-webhook"
-    content_type = "json"
-    insecure_ssl = false
-  }
-
-  active = true
-
-  events = ["issues"]
-}
-
-# S3 Bucket for Frontend Hosting
-resource "aws_s3_bucket" "frontend" {
-  bucket_prefix = "textractor-frontend-"
-  force_destroy = true
-}
-
-resource "aws_s3_bucket_website_configuration" "frontend" {
-  bucket = aws_s3_bucket.frontend.id
-
-  index_document {
-    suffix = "index.html"
-  }
-
-  error_document {
-    key = "index.html"
-  }
-}
-
-resource "aws_s3_bucket_public_access_block" "frontend" {
-  bucket = aws_s3_bucket.frontend.id
-
-  block_public_acls       = false
-  block_public_policy     = false
-  ignore_public_acls      = false
-  restrict_public_buckets = false
-}
-
-resource "aws_s3_bucket_policy" "frontend_policy" {
-  bucket = aws_s3_bucket.frontend.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Sid       = "PublicReadGetObject"
-        Effect    = "Allow"
-        Principal = "*"
-        Action    = "s3:GetObject"
-        Resource  = "${aws_s3_bucket.frontend.arn}/*"
-      },
-    ]
-  })
-  depends_on = [aws_s3_bucket_public_access_block.frontend]
-}
-
 # S3 Bucket for Uploads
 resource "aws_s3_bucket" "uploads" {
   bucket_prefix = "text-extractor-uploads-"
@@ -145,7 +40,7 @@ resource "aws_s3_bucket_cors_configuration" "uploads_cors" {
   cors_rule {
     allowed_headers = ["*"]
     allowed_methods = ["PUT", "POST", "GET"]
-    allowed_origins = ["*"] # In production, restrict to your frontend domain
+    allowed_origins = ["*"]
     max_age_seconds = 3000
   }
 }
@@ -167,19 +62,36 @@ resource "aws_dynamodb_table" "extractions" {
   }
 }
 
-# ECR Repository for Frontend/Backend Dockerization
-resource "aws_ecr_repository" "app" {
-  name                 = "textractor-app"
-  image_tag_mutability = "MUTABLE"
+# EC2 Security Group
+resource "aws_security_group" "web_sg" {
+  name        = "textractor-web-sg"
+  description = "Allow HTTP and SSH traffic"
 
-  image_scanning_configuration {
-    scan_on_push = true
+  ingress {
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
   }
 }
 
-# IAM Role for Lambdas
-resource "aws_iam_role" "lambda_role" {
-  name = "text_extractor_lambda_role"
+# IAM Role for EC2
+resource "aws_iam_role" "ec2_role" {
+  name = "text_extractor_ec2_role"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -187,15 +99,15 @@ resource "aws_iam_role" "lambda_role" {
       Action = "sts:AssumeRole"
       Effect = "Allow"
       Principal = {
-        Service = "lambda.amazonaws.com"
+        Service = "ec2.amazonaws.com"
       }
     }]
   })
 }
 
-resource "aws_iam_role_policy" "lambda_policy" {
-  name = "text_extractor_lambda_policy"
-  role = aws_iam_role.lambda_role.id
+resource "aws_iam_role_policy" "ec2_policy" {
+  name = "text_extractor_ec2_policy"
+  role = aws_iam_role.ec2_role.id
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -217,203 +129,73 @@ resource "aws_iam_role_policy" "lambda_policy" {
           "dynamodb:PutItem",
           "dynamodb:GetItem",
           "dynamodb:UpdateItem",
-          "dynamodb:Query"
+          "dynamodb:Query",
+          "dynamodb:Scan"
         ]
         Effect   = "Allow"
         Resource = aws_dynamodb_table.extractions.arn
-      },
-      {
-        Action = "lambda:InvokeFunction"
-        Effect = "Allow"
-        Resource = aws_lambda_function.extraction_processor.arn
-      },
-      {
-        Action = [
-          "logs:CreateLogGroup",
-          "logs:CreateLogStream",
-          "logs:PutLogEvents"
-        ]
-        Effect   = "Allow"
-        Resource = "arn:aws:logs:*:*:*"
       }
     ]
   })
 }
 
-# Data sources for Lambda packaging
-data "archive_file" "get_presigned_url" {
-  type        = "zip"
-  source_dir  = "../backend/lambdas/get-presigned-url/dist"
-  output_path = "get-presigned-url.zip"
+resource "aws_iam_instance_profile" "ec2_profile" {
+  name = "text_extractor_ec2_profile"
+  role = aws_iam_role.ec2_role.name
 }
 
-data "archive_file" "start_extraction" {
-  type        = "zip"
-  source_dir  = "../backend/lambdas/start-extraction/dist"
-  output_path = "start-extraction.zip"
-}
+# Get Latest Ubuntu 22.04 AMI
+data "aws_ami" "ubuntu" {
+  most_recent = true
 
-data "archive_file" "extraction_processor" {
-  type        = "zip"
-  source_dir  = "../backend/lambdas/extraction-processor/dist"
-  output_path = "extraction-processor.zip"
-}
-
-data "archive_file" "get_status" {
-  type        = "zip"
-  source_dir  = "../backend/lambdas/get-status/dist"
-  output_path = "get-status.zip"
-}
-
-# Lambdas
-resource "aws_lambda_function" "get_presigned_url" {
-  function_name    = "GetPresignedUrl"
-  role             = aws_iam_role.lambda_role.arn
-  handler          = "index.handler"
-  runtime          = "python3.11"
-  filename         = data.archive_file.get_presigned_url.output_path
-  source_code_hash = data.archive_file.get_presigned_url.output_base64sha256
-
-  environment {
-    variables = {
-      BUCKET_NAME = aws_s3_bucket.uploads.id
-    }
+  filter {
+    name   = "name"
+    values = ["ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-amd64-server-*"]
   }
-}
 
-resource "aws_lambda_function" "start_extraction" {
-  function_name    = "StartExtraction"
-  role             = aws_iam_role.lambda_role.arn
-  handler          = "index.handler"
-  runtime          = "python3.11"
-  filename         = data.archive_file.start_extraction.output_path
-  source_code_hash = data.archive_file.start_extraction.output_base64sha256
-
-  environment {
-    variables = {
-      TABLE_NAME       = aws_dynamodb_table.extractions.name
-      PROCESSOR_LAMBDA = aws_lambda_function.extraction_processor.function_name
-    }
+  filter {
+    name   = "virtualization-type"
+    values = ["hvm"]
   }
+
+  owners = ["099720109477"] # Canonical
 }
 
-resource "aws_lambda_function" "extraction_processor" {
-  function_name    = "ExtractionProcessor"
-  role             = aws_iam_role.lambda_role.arn
-  handler          = "index.handler"
-  runtime          = "python3.11"
-  filename         = data.archive_file.extraction_processor.output_path
-  source_code_hash = data.archive_file.extraction_processor.output_base64sha256
-  timeout          = 60
-  memory_size      = 256
+# EC2 Instance
+resource "aws_instance" "monolith" {
+  ami                    = data.aws_ami.ubuntu.id
+  instance_type          = "t2.micro"
+  vpc_security_group_ids = [aws_security_group.web_sg.id]
+  iam_instance_profile   = aws_iam_instance_profile.ec2_profile.name
 
-  environment {
-    variables = {
-      TABLE_NAME = aws_dynamodb_table.extractions.name
-    }
+  user_data = <<-EOF
+              #!/bin/bash
+              # Set environment variables for the session and persistence
+              export SECRET_CODE=${var.secret_code}
+              export BUCKET_NAME=${aws_s3_bucket.uploads.id}
+              export TABLE_NAME=${aws_dynamodb_table.extractions.name}
+              echo "export SECRET_CODE=${var.secret_code}" >> /etc/profile
+              echo "export BUCKET_NAME=${aws_s3_bucket.uploads.id}" >> /etc/profile
+              echo "export TABLE_NAME=${aws_dynamodb_table.extractions.name}" >> /etc/profile
+              
+              # Install system dependencies
+              apt-get update
+              apt-get install -y python3-pip git
+              
+              # Clone the repository
+              cd /home/ubuntu
+              git clone https://github.com/${var.github_owner}/${var.github_repo}.git
+              cd ${var.github_repo}/backend/monolith
+              
+              # Install Python dependencies
+              pip3 install -r requirements.txt
+              
+              # Start the FastAPI app using uvicorn in the background
+              # Run on port 80
+              nohup uvicorn main:app --host 0.0.0.0 --port 80 > /var/log/textractor.log 2>&1 &
+              EOF
+
+  tags = {
+    Name = "TextExtractorMonolith"
   }
-}
-
-resource "aws_lambda_function" "get_status" {
-  function_name    = "GetStatus"
-  role             = aws_iam_role.lambda_role.arn
-  handler          = "index.handler"
-  runtime          = "python3.11"
-  filename         = data.archive_file.get_status.output_path
-  source_code_hash = data.archive_file.get_status.output_base64sha256
-
-  environment {
-    variables = {
-      TABLE_NAME = aws_dynamodb_table.extractions.name
-    }
-  }
-}
-
-# API Gateway (HTTP API)
-resource "aws_apigatewayv2_api" "api" {
-  name          = "TextExtractorAPI"
-  protocol_type = "HTTP"
-  cors_configuration {
-    allow_origins = ["*"]
-    allow_methods = ["POST", "GET", "OPTIONS"]
-    allow_headers = ["content-type"]
-  }
-}
-
-resource "aws_apigatewayv2_stage" "default" {
-  api_id      = aws_apigatewayv2_api.api.id
-  name        = "$default"
-  auto_deploy = true
-
-  access_log_settings {
-    destination_arn = aws_cloudwatch_log_group.api_gw.arn
-    format          = "$context.identity.sourceIp - $context.identity.caller - $context.identity.user [$context.requestTime] \"$context.httpMethod $context.routeKey $context.protocol\" $context.status $context.responseLength $context.requestId"
-  }
-}
-
-resource "aws_cloudwatch_log_group" "api_gw" {
-  name              = "/aws/api_gw/${aws_apigatewayv2_api.api.name}"
-  retention_in_days = 1
-}
-
-# Routes and Integrations
-resource "aws_apigatewayv2_integration" "get_presigned_url" {
-  api_id           = aws_apigatewayv2_api.api.id
-  integration_type = "AWS_PROXY"
-  integration_uri  = aws_lambda_function.get_presigned_url.invoke_arn
-}
-
-resource "aws_apigatewayv2_route" "get_presigned_url" {
-  api_id    = aws_apigatewayv2_api.api.id
-  route_key = "POST /presigned-url"
-  target    = "integrations/${aws_apigatewayv2_integration.get_presigned_url.id}"
-}
-
-resource "aws_apigatewayv2_integration" "start_extraction" {
-  api_id           = aws_apigatewayv2_api.api.id
-  integration_type = "AWS_PROXY"
-  integration_uri  = aws_lambda_function.start_extraction.invoke_arn
-}
-
-resource "aws_apigatewayv2_route" "start_extraction" {
-  api_id    = aws_apigatewayv2_api.api.id
-  route_key = "POST /start"
-  target    = "integrations/${aws_apigatewayv2_integration.start_extraction.id}"
-}
-
-resource "aws_apigatewayv2_integration" "get_status" {
-  api_id           = aws_apigatewayv2_api.api.id
-  integration_type = "AWS_PROXY"
-  integration_uri  = aws_lambda_function.get_status.invoke_arn
-}
-
-resource "aws_apigatewayv2_route" "get_status" {
-  api_id    = aws_apigatewayv2_api.api.id
-  route_key = "GET /status/{fileId}"
-  target    = "integrations/${aws_apigatewayv2_integration.get_status.id}"
-}
-
-# Lambda Permissions for API Gateway
-resource "aws_lambda_permission" "api_gw_get_presigned_url" {
-  statement_id  = "AllowExecutionFromAPIGateway"
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.get_presigned_url.function_name
-  principal     = "apigateway.amazonaws.com"
-  source_arn    = "${aws_apigatewayv2_api.api.execution_arn}/*/*"
-}
-
-resource "aws_lambda_permission" "api_gw_start_extraction" {
-  statement_id  = "AllowExecutionFromAPIGateway"
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.start_extraction.function_name
-  principal     = "apigateway.amazonaws.com"
-  source_arn    = "${aws_apigatewayv2_api.api.execution_arn}/*/*"
-}
-
-resource "aws_lambda_permission" "api_gw_get_status" {
-  statement_id  = "AllowExecutionFromAPIGateway"
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.get_status.function_name
-  principal     = "apigateway.amazonaws.com"
-  source_arn    = "${aws_apigatewayv2_api.api.execution_arn}/*/*"
 }

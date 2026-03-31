@@ -33,8 +33,15 @@ do
 
     # Install dependencies if requirements.txt exists and is not empty
     if [ -s "$LAMBDA_DIR/requirements.txt" ]; then
-        echo "Installing dependencies for $LAMBDA..."
-        pip3 install -r "$LAMBDA_DIR/requirements.txt" --target "$DIST_DIR/"
+        echo "Installing dependencies for $LAMBDA (Linux x86_64 binaries)..."
+        pip3 install \
+            --platform manylinux2014_x86_64 \
+            --target "$DIST_DIR/" \
+            --implementation cp \
+            --python-version 3.11 \
+            --only-binary=:all: \
+            --upgrade \
+            -r "$LAMBDA_DIR/requirements.txt"
     fi
 done
 

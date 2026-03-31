@@ -20,3 +20,9 @@ variable "sprites_token" {
   type      = string
   sensitive = true
 }
+
+variable "secret_code" {
+  type      = string
+  sensitive = true
+  default   = "super-secret-textractor-code"
+}
