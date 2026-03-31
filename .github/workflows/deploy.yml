@@ -3,6 +3,16 @@ name: Dockerized Deploy & Infrastructure
 on:
   push:
     branches: [ main, feature/text-extraction-improvements ]
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Action to perform (apply/destroy)'
+        required: true
+        default: 'apply'
+        type: choice
+        options:
+        - apply
+        - destroy
 
 jobs:
   terraform-and-deploy:
@@ -29,18 +39,20 @@ jobs:
           python-version: '3.11'
 
       - name: Build Backend Lambdas
+        if: github.event.inputs.action != 'destroy'
         working-directory: ./backend
         run: |
           chmod +x build.sh
           ./build.sh
 
       - name: Verify Dist Folders
+        if: github.event.inputs.action != 'destroy'
         run: |
           echo "Listing all dist directories to confirm existence:"
           find backend/lambdas -name "dist" -type d
           ls -R backend/lambdas/*/dist
 
-      - name: Terraform Init & Apply
+      - name: Terraform Init & Apply/Destroy
         id: terraform
         working-directory: ./terraform
         env:
@@ -51,12 +63,17 @@ jobs:
           TF_VAR_region: ${{ secrets.AWS_REGION }}
         run: |
           terraform init
-          terraform apply -auto-approve
-          echo "API_URL=$(terraform output -raw api_url)" >> $GITHUB_ENV
-          echo "FRONTEND_BUCKET=$(terraform output -raw frontend_bucket_name)" >> $GITHUB_ENV
-          echo "UPLOADS_BUCKET=$(terraform output -raw s3_bucket_name)" >> $GITHUB_ENV
+          if [[ "${{ github.event.inputs.action }}" == "destroy" ]]; then
+            terraform destroy -auto-approve
+          else
+            terraform apply -auto-approve
+            echo "API_URL=$(terraform output -raw api_url)" >> $GITHUB_ENV
+            echo "FRONTEND_BUCKET=$(terraform output -raw frontend_bucket_name)" >> $GITHUB_ENV
+            echo "UPLOADS_BUCKET=$(terraform output -raw s3_bucket_name)" >> $GITHUB_ENV
+          fi
 
       - name: Build and Deploy Frontend to S3
+        if: github.event.inputs.action != 'destroy'
         working-directory: ./frontend
         env:
           NEXT_PUBLIC_API_URL: ${{ env.API_URL }}
