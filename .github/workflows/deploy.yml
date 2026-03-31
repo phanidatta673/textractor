@@ -41,6 +41,7 @@ jobs:
           ls -R backend/lambdas/*/dist
 
       - name: Terraform Init & Apply
+        id: terraform
         working-directory: ./terraform
         env:
           TF_VAR_github_token: ${{ secrets.GH_PAT }}
@@ -51,6 +52,21 @@ jobs:
         run: |
           terraform init
           terraform apply -auto-approve
+          echo "API_URL=$(terraform output -raw api_url)" >> $GITHUB_ENV
+          echo "FRONTEND_BUCKET=$(terraform output -raw frontend_bucket_name)" >> $GITHUB_ENV
+          echo "UPLOADS_BUCKET=$(terraform output -raw s3_bucket_name)" >> $GITHUB_ENV
+
+      - name: Build and Deploy Frontend to S3
+        working-directory: ./frontend
+        env:
+          NEXT_PUBLIC_API_URL: ${{ env.API_URL }}
+          NEXT_PUBLIC_BUCKET_NAME: ${{ env.UPLOADS_BUCKET }}
+        run: |
+          npm install
+          # Next.js static export
+          npm run build
+          # Sync the 'out' directory to S3
+          aws s3 sync out/ s3://${{ env.FRONTEND_BUCKET }} --delete
 
       - name: Login to Amazon ECR
         id: login-ecr
