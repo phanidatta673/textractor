@@ -5,3 +5,5 @@ dist/
 terraform.tfstate*
 *.zip
 **/dist/
+__pycache__/
+*.pyc
