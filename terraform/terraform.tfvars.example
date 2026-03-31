@@ -1,0 +1,17 @@
+# Required variables for Text Extractor App
+# Fill these in with your actual values
+
+# AWS region
+region = "us-east-1"
+
+# GitHub Personal Access Token (with repo, workflow, and admin:repo_hook scopes)
+github_token = "YOUR_GITHUB_PAT"
+
+# GitHub username/organization
+github_owner = "phanidatta673"
+
+# GitHub repository name
+github_repo = "textractor"
+
+# Sprite Sandbox API Token (from sprites.dev)
+sprites_token = "YOUR_SPRITES_TOKEN"
