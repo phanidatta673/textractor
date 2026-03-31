@@ -18,9 +18,8 @@ provider "github" {
 
 data "archive_file" "github_issue_handler" {
   type        = "zip"
-  source_dir  = "../backend/lambdas/github-issue-handler"
+  source_dir  = "../backend/lambdas/github-issue-handler/dist"
   output_path = "github-issue-handler.zip"
-  excludes    = ["node_modules", "package-lock.json", "index.ts"]
 }
 
 # GitHub Issue Handler Lambda
@@ -28,7 +27,7 @@ resource "aws_lambda_function" "github_issue_handler" {
   function_name    = "GitHubIssueHandler"
   role             = aws_iam_role.lambda_role.arn
   handler          = "index.handler"
-  runtime          = "nodejs18.x"
+  runtime          = "python3.11"
   filename         = data.archive_file.github_issue_handler.output_path
   source_code_hash = data.archive_file.github_issue_handler.output_base64sha256
 
@@ -199,30 +198,26 @@ resource "aws_iam_role_policy" "lambda_policy" {
 # Data sources for Lambda packaging
 data "archive_file" "get_presigned_url" {
   type        = "zip"
-  source_dir  = "../backend/lambdas/get-presigned-url"
+  source_dir  = "../backend/lambdas/get-presigned-url/dist"
   output_path = "get-presigned-url.zip"
-  excludes    = ["node_modules", "package-lock.json", "index.ts"]
 }
 
 data "archive_file" "start_extraction" {
   type        = "zip"
-  source_dir  = "../backend/lambdas/start-extraction"
+  source_dir  = "../backend/lambdas/start-extraction/dist"
   output_path = "start-extraction.zip"
-  excludes    = ["node_modules", "package-lock.json", "index.ts"]
 }
 
 data "archive_file" "extraction_processor" {
   type        = "zip"
-  source_dir  = "../backend/lambdas/extraction-processor"
+  source_dir  = "../backend/lambdas/extraction-processor/dist"
   output_path = "extraction-processor.zip"
-  excludes    = ["node_modules", "package-lock.json", "index.ts"]
 }
 
 data "archive_file" "get_status" {
   type        = "zip"
-  source_dir  = "../backend/lambdas/get-status"
+  source_dir  = "../backend/lambdas/get-status/dist"
   output_path = "get-status.zip"
-  excludes    = ["node_modules", "package-lock.json", "index.ts"]
 }
 
 # Lambdas
@@ -230,7 +225,7 @@ resource "aws_lambda_function" "get_presigned_url" {
   function_name    = "GetPresignedUrl"
   role             = aws_iam_role.lambda_role.arn
   handler          = "index.handler"
-  runtime          = "nodejs18.x"
+  runtime          = "python3.11"
   filename         = data.archive_file.get_presigned_url.output_path
   source_code_hash = data.archive_file.get_presigned_url.output_base64sha256
 
@@ -245,7 +240,7 @@ resource "aws_lambda_function" "start_extraction" {
   function_name    = "StartExtraction"
   role             = aws_iam_role.lambda_role.arn
   handler          = "index.handler"
-  runtime          = "nodejs18.x"
+  runtime          = "python3.11"
   filename         = data.archive_file.start_extraction.output_path
   source_code_hash = data.archive_file.start_extraction.output_base64sha256
 
@@ -261,7 +256,7 @@ resource "aws_lambda_function" "extraction_processor" {
   function_name    = "ExtractionProcessor"
   role             = aws_iam_role.lambda_role.arn
   handler          = "index.handler"
-  runtime          = "nodejs18.x"
+  runtime          = "python3.11"
   filename         = data.archive_file.extraction_processor.output_path
   source_code_hash = data.archive_file.extraction_processor.output_base64sha256
   timeout          = 60
@@ -278,7 +273,7 @@ resource "aws_lambda_function" "get_status" {
   function_name    = "GetStatus"
   role             = aws_iam_role.lambda_role.arn
   handler          = "index.handler"
-  runtime          = "nodejs18.x"
+  runtime          = "python3.11"
   filename         = data.archive_file.get_status.output_path
   source_code_hash = data.archive_file.get_status.output_base64sha256
 

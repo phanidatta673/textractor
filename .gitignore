@@ -4,3 +4,4 @@ dist/
 .terraform/
 terraform.tfstate*
 *.zip
+**/dist/
