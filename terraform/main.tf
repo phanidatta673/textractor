@@ -184,7 +184,7 @@ resource "aws_instance" "monolith" {
               
               # Clone the repository
               cd /home/ubuntu
-              git clone https://github.com/${var.github_owner}/${var.github_repo}.git
+              git clone -b feature/text-extraction-improvements https://github.com/${var.github_owner}/${var.github_repo}.git
               cd ${var.github_repo}/backend/monolith
               
               # Install Python dependencies
@@ -194,6 +194,8 @@ resource "aws_instance" "monolith" {
               # Run on port 80
               nohup uvicorn main:app --host 0.0.0.0 --port 80 > /var/log/textractor.log 2>&1 &
               EOF
+
+  user_data_replace_on_change = true
 
   tags = {
     Name = "TextExtractorMonolith"
