@@ -55,6 +55,19 @@
                         </span>
                         <input type="file" id="fileInput" class="hidden" multiple accept=".pdf,.docx,.txt,.zip">
                     </div>
+
+                    <!-- Selected Files Queue -->
+                    <div id="fileQueue" class="mt-4 hidden">
+                        <div class="flex items-center justify-between mb-2">
+                            <h3 class="text-sm font-medium text-gray-700">Queue</h3>
+                            <button id="submitBtn" class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
+                                Submit All
+                            </button>
+                        </div>
+                        <ul id="queueList" class="bg-white rounded-md border border-gray-200 divide-y divide-gray-200">
+                            <!-- Queue items -->
+                        </ul>
+                    </div>
                 </div>
 
                 <!-- Active Uploads / Status -->
@@ -116,8 +129,12 @@
         const closeModal = document.getElementById('closeModal');
         const copyText = document.getElementById('copyText');
         const clearHistory = document.getElementById('clearHistory');
+        const fileQueue = document.getElementById('fileQueue');
+        const queueList = document.getElementById('queueList');
+        const submitBtn = document.getElementById('submitBtn');
 
         let extractions = JSON.parse(localStorage.getItem('extractions') || '[]');
+        let filesToUpload = [];
         
         // Initialize
         secretCodeInput.value = localStorage.getItem('secretCode') || '';
@@ -159,6 +176,8 @@
             handleFiles(e.target.files);
         });
 
+        submitBtn.addEventListener('click', submitAll);
+
         closeModal.addEventListener('click', () => modal.classList.add('hidden'));
         
         copyText.addEventListener('click', () => {
@@ -175,66 +194,79 @@
 
         // --- Core Functions ---
 
-        async function handleFiles(files) {
+        function handleFiles(files) {
+            for (const file of files) {
+                filesToUpload.push(file);
+            }
+            renderQueue();
+        }
+
+        function renderQueue() {
+            if (filesToUpload.length === 0) {
+                fileQueue.classList.add('hidden');
+                return;
+            }
+
+            fileQueue.classList.remove('hidden');
+            queueList.innerHTML = filesToUpload.map((file, index) => `
+                <li class="px-4 py-2 flex items-center justify-between">
+                    <div class="flex items-center">
+                        <i class="${getFileIcon(file.name)} text-gray-400 mr-2"></i>
+                        <span class="text-sm text-gray-700">${file.name}</span>
+                    </div>
+                    <button onclick="removeFromQueue(${index})" class="text-gray-400 hover:text-red-500">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </li>
+            `).join('');
+        }
+
+        window.removeFromQueue = function(index) {
+            filesToUpload.splice(index, 1);
+            renderQueue();
+        };
+
+        async function submitAll() {
             const secret = secretCodeInput.value;
             if (!secret) {
                 alert('Please enter a secret code first.');
                 return;
             }
 
+            if (filesToUpload.length === 0) return;
+
+            const files = [...filesToUpload];
+            filesToUpload = [];
+            renderQueue();
+
             for (const file of files) {
-                const id = Math.random().toString(36).substr(2, 9);
                 const extraction = {
-                    id,
+                    id: Math.random().toString(36).substr(2, 9),
                     filename: file.name,
-                    status: 'UPLOADING',
-                    timestamp: new Date().toISOString(),
-                    progress: 0
+                    status: 'PENDING',
+                    timestamp: new Date().toISOString()
                 };
                 
                 extractions.unshift(extraction);
+                saveExtractions();
                 renderExtractions();
                 
                 try {
-                    // 1. Get Presigned URL
-                    const res = await fetch('/api/presigned-url', {
+                    const formData = new FormData();
+                    formData.append('file', file);
+
+                    const res = await fetch('/api/process', {
                         method: 'POST',
                         headers: { 
-                            'Content-Type': 'application/json',
                             'X-Secret-Code': secret 
                         },
-                        body: JSON.stringify({
-                            filename: file.name,
-                            contentType: file.type || 'application/octet-stream'
-                        })
+                        body: formData
                     });
                     
                     if (!res.ok) throw new Error(await res.text());
-                    const { uploadUrl, fileId, key } = await res.json();
+                    const data = await res.json();
                     
-                    // Update internal ID to match backend fileId
-                    extraction.fileId = fileId;
-                    extraction.backendKey = key;
-
-                    // 2. Upload to S3
-                    await uploadToS3(uploadUrl, file, (progress) => {
-                        extraction.progress = progress;
-                        renderExtractions();
-                    });
-
-                    // 3. Start Extraction
-                    const startRes = await fetch('/api/start', {
-                        method: 'POST',
-                        headers: { 
-                            'Content-Type': 'application/json',
-                            'X-Secret-Code': secret 
-                        },
-                        body: JSON.stringify({ fileId, key })
-                    });
-                    
-                    if (!startRes.ok) throw new Error(await startRes.text());
-                    
-                    extraction.status = 'PENDING';
+                    extraction.fileId = data.fileId;
                 } catch (err) {
                     console.error(err);
                     extraction.status = 'FAILED';
@@ -246,30 +278,8 @@
             }
         }
 
-        function uploadToS3(url, file, onProgress) {
-            return new Promise((resolve, reject) => {
-                const xhr = new XMLHttpRequest();
-                xhr.open('PUT', url);
-                xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
-                
-                xhr.upload.onprogress = (e) => {
-                    if (e.lengthComputable) {
-                        onProgress(Math.round((e.loaded / e.total) * 100));
-                    }
-                };
-                
-                xhr.onload = () => {
-                    if (xhr.status === 200) resolve();
-                    else reject(new Error('S3 Upload failed'));
-                };
-                
-                xhr.onerror = () => reject(new Error('Network error during upload'));
-                xhr.send(file);
-            });
-        }
-
         async function pollActiveExtractions() {
-            const active = extractions.filter(e => ['PENDING', 'PROCESSING'].includes(e.status));
+            const active = extractions.filter(e => ['PENDING', 'PROCESSING'].includes(e.status) && e.fileId);
             if (active.length === 0) return;
 
             for (const extraction of active) {
@@ -316,11 +326,6 @@
                             </div>
                         </div>
                         <div class="ml-2 flex-shrink-0 flex items-center space-x-2">
-                            ${e.status === 'UPLOADING' ? `
-                                <div class="w-24 bg-gray-200 rounded-full h-1.5 mr-2">
-                                    <div class="bg-indigo-600 h-1.5 rounded-full" style="width: ${e.progress}%"></div>
-                                </div>
-                            ` : ''}
                             <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full status-${e.status.toLowerCase()}">
                                 ${e.status}
                             </span>
