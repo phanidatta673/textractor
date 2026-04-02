@@ -9,6 +9,10 @@ import io
 import zipfile
 import time
 import json
+import argparse
+import sys
+import re
+import urllib.request
 from datetime import datetime
 from pypdf import PdfReader
 import docx
@@ -131,6 +135,77 @@ async def process_extraction(bucket: str, key: str, file_id: str):
         print(f"Extraction error for {file_id}: {e}")
         update_status(file_id, 'FAILED', error=str(e))
 
+def process_github_issue(issue_id):
+    repo = os.environ.get('GITHUB_REPOSITORY')
+    token = os.environ.get('GITHUB_TOKEN')
+    
+    if not repo or not token:
+        print("Error: GITHUB_REPOSITORY and GITHUB_TOKEN environment variables must be set.")
+        return
+
+    api_url = f"https://api.github.com/repos/{repo}/issues/{issue_id}"
+    print(f"Fetching issue {issue_id} from {repo}...")
+
+    # Fetch issue
+    req = urllib.request.Request(api_url)
+    req.add_header('Authorization', f'token {token}')
+    req.add_header('Accept', 'application/vnd.github.v3+json')
+    req.add_header('User-Agent', 'Textractor-CLI')
+    
+    try:
+        with urllib.request.urlopen(req) as response:
+            issue_data = json.loads(response.read().decode())
+    except Exception as e:
+        print(f"Error fetching issue: {e}")
+        return
+
+    body = issue_data.get('body', '') or ""
+    
+    # Find links ending in supported extensions
+    links = re.findall(r'https?://[^\s\)]+\.(?:pdf|docx|txt|zip)', body, re.IGNORECASE)
+    links = list(set(links)) # Unique links
+    
+    results = []
+    if not links:
+        print("No supported attachments found in issue body.")
+    
+    for link in links:
+        print(f"Processing: {link}")
+        ext = link.split('.')[-1].lower()
+        try:
+            att_req = urllib.request.Request(link)
+            if "github.com" in link:
+                att_req.add_header('Authorization', f'token {token}')
+            att_req.add_header('User-Agent', 'Textractor-CLI')
+            
+            with urllib.request.urlopen(att_req) as att_res:
+                content = att_res.read()
+                text = extract_text(content, ext)
+                results.append(f"### Results for {os.path.basename(link)}\n\n```\n{text[:2000]}{'...' if len(text) > 2000 else ''}\n```")
+        except Exception as e:
+            print(f"Error processing {link}: {e}")
+            results.append(f"### Error for {os.path.basename(link)}\n\n{str(e)}")
+
+    if not results:
+        comment_body = "CLI Mode: No supported attachments (PDF, DOCX, TXT, ZIP) found in the issue body."
+    else:
+        comment_body = "## Textractor Extraction Results\n\n" + "\n\n---\n\n".join(results)
+
+    # Post comment
+    comment_url = f"{api_url}/comments"
+    data = json.dumps({"body": comment_body}).encode('utf-8')
+    comment_req = urllib.request.Request(comment_url, data=data, method='POST')
+    comment_req.add_header('Authorization', f'token {token}')
+    comment_req.add_header('Accept', 'application/vnd.github.v3+json')
+    comment_req.add_header('User-Agent', 'Textractor-CLI')
+    comment_req.add_header('Content-Type', 'application/json')
+
+    try:
+        with urllib.request.urlopen(comment_req) as response:
+            print(f"Successfully posted comment to GitHub issue {issue_id}.")
+    except Exception as e:
+        print(f"Error posting comment: {e}")
+
 @app.get("/health")
 async def health_check():
     return {"status": "healthy"}
@@ -211,5 +286,12 @@ async def get_html():
         return f.read()
 
 if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    parser = argparse.ArgumentParser(description="Textractor Monolith CLI")
+    parser.add_argument("--process-issue", type=str, help="GitHub Issue ID to process")
+    args = parser.parse_args()
+
+    if args.process_issue:
+        process_github_issue(args.process_issue)
+    else:
+        import uvicorn
+        uvicorn.run(app, host="0.0.0.0", port=8000)
