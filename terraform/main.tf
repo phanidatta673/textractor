@@ -184,12 +184,14 @@ resource "aws_instance" "monolith" {
             export TABLE_NAME=${aws_dynamodb_table.extractions.name}
             export SPRITES_TOKEN=${var.sprites_token}
             export GITHUB_TOKEN=${var.github_token}
+            export GITHUB_REPOSITORY=${var.github_owner}/${var.github_repo}
             
             echo "export SECRET_CODE=${var.secret_code}" >> /etc/profile
             echo "export BUCKET_NAME=${aws_s3_bucket.uploads.id}" >> /etc/profile
             echo "export TABLE_NAME=${aws_dynamodb_table.extractions.name}" >> /etc/profile
             echo "export SPRITES_TOKEN=${var.sprites_token}" >> /etc/profile
             echo "export GITHUB_TOKEN=${var.github_token}" >> /etc/profile
+            echo "export GITHUB_REPOSITORY=${var.github_owner}/${var.github_repo}" >> /etc/profile
               
               # Install system dependencies
               apt-get update -y
