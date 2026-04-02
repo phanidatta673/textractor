@@ -164,35 +164,54 @@ data "aws_ami" "ubuntu" {
 # EC2 Instance
 resource "aws_instance" "monolith" {
   ami                    = data.aws_ami.ubuntu.id
-  instance_type          = "t2.micro"
+  instance_type          = "t2.small"
   vpc_security_group_ids = [aws_security_group.web_sg.id]
   iam_instance_profile   = aws_iam_instance_profile.ec2_profile.name
-
   user_data = <<-EOF
               #!/bin/bash
-              # Set environment variables for the session and persistence
-              export SECRET_CODE=${var.secret_code}
-              export BUCKET_NAME=${aws_s3_bucket.uploads.id}
-              export TABLE_NAME=${aws_dynamodb_table.extractions.name}
-              echo "export SECRET_CODE=${var.secret_code}" >> /etc/profile
-              echo "export BUCKET_NAME=${aws_s3_bucket.uploads.id}" >> /etc/profile
-              echo "export TABLE_NAME=${aws_dynamodb_table.extractions.name}" >> /etc/profile
+              # Force recreation comment: v1.0.4
+              exec > /home/ubuntu/userdata.log 2>&1
+            echo "Starting user_data execution..."
+
+            # Configure firewall
+            ufw allow 80/tcp
+            ufw allow 22/tcp
+            echo "y" | ufw enable
+
+            # Set environment variables for the session and persistence
+            export SECRET_CODE=${var.secret_code}
+            export BUCKET_NAME=${aws_s3_bucket.uploads.id}
+            export TABLE_NAME=${aws_dynamodb_table.extractions.name}
+            export SPRITES_TOKEN=${var.sprites_token}
+            export GITHUB_TOKEN=${var.github_token}
+            
+            echo "export SECRET_CODE=${var.secret_code}" >> /etc/profile
+            echo "export BUCKET_NAME=${aws_s3_bucket.uploads.id}" >> /etc/profile
+            echo "export TABLE_NAME=${aws_dynamodb_table.extractions.name}" >> /etc/profile
+            echo "export SPRITES_TOKEN=${var.sprites_token}" >> /etc/profile
+            echo "export GITHUB_TOKEN=${var.github_token}" >> /etc/profile
               
               # Install system dependencies
-              apt-get update
+              apt-get update -y
               apt-get install -y python3-pip git
               
               # Clone the repository
+              echo "Cloning repository..."
               cd /home/ubuntu
               git clone -b feature/text-extraction-improvements https://github.com/${var.github_owner}/${var.github_repo}.git
               cd ${var.github_repo}/backend/monolith
               
               # Install Python dependencies
-              pip3 install -r requirements.txt
+              echo "Installing Python dependencies..."
+              pip3 install fastapi uvicorn boto3 pypdf python-docx python-multipart jinja2
               
-              # Start the FastAPI app using uvicorn in the background
-              # Run on port 80
-              nohup uvicorn main:app --host 0.0.0.0 --port 80 > /var/log/textractor.log 2>&1 &
+              # Start the FastAPI app on port 80
+              echo "Starting FastAPI app..."
+              # Use full path to uvicorn if necessary
+              PYTHON_PATH=$(which uvicorn)
+              nohup uvicorn main:app --host 0.0.0.0 --port 80 > /home/ubuntu/app.log 2>&1 &
+              
+              echo "user_data execution complete."
               EOF
 
   user_data_replace_on_change = true
