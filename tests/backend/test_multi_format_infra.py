@@ -7,7 +7,8 @@ from pypdf import PdfWriter
 from docx import Document
 import io
 
-API_BASE = "https://w8cw1eshvc.execute-api.us-east-1.amazonaws.com"
+API_BASE = "http://54.234.232.237/api"
+SECRET_CODE = "super-secret-textractor-code"
 BUCKET = "text-extractor-uploads-20260331222735145300000002"
 
 def create_test_files():
@@ -16,11 +17,7 @@ def create_test_files():
     # 1. PDF
     pdf_path = "test_sample.pdf"
     writer = PdfWriter()
-    page = writer.add_blank_page(width=72, height=72)
-    # Note: Adding text to PDF programmatically is complex with just pypdf, 
-    # but the Lambda uses pypdf to read. I'll just use a simple text for now 
-    # or rely on the fact that pypdf reader works if there's content.
-    # Actually, let's just make sure they exist.
+    writer.add_blank_page(width=72, height=72)
     with open(pdf_path, "wb") as f:
         writer.write(f)
 
@@ -47,11 +44,13 @@ def run_test(file_info):
     ctype = file_info['type']
     print(f"\nTesting file: {path} ({ctype})")
     
+    headers = {"X-Secret-Code": SECRET_CODE}
+    
     # 1. Get Presigned URL
     res = requests.post(f"{API_BASE}/presigned-url", json={
         "filename": path,
         "contentType": ctype
-    })
+    }, headers=headers)
     res.raise_for_status()
     data = res.json()
     upload_url = data['uploadUrl']
@@ -68,7 +67,7 @@ def run_test(file_info):
         "fileId": file_id,
         "key": key,
         "bucket": BUCKET
-    })
+    }, headers=headers)
     res.raise_for_status()
 
     # 4. Poll Status
