@@ -139,6 +139,11 @@ resource "aws_iam_role_policy" "ec2_policy" {
   })
 }
 
+resource "aws_iam_role_policy_attachment" "ssm_policy" {
+  role       = aws_iam_role.ec2_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}
+
 resource "aws_iam_instance_profile" "ec2_profile" {
   name = "text_extractor_ec2_profile"
   role = aws_iam_role.ec2_role.name
@@ -161,60 +166,90 @@ data "aws_ami" "ubuntu" {
   owners = ["099720109477"] # Canonical
 }
 
+resource "aws_key_pair" "deployer" {
+  key_name   = "textractor-deployer-key"
+  public_key = "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAACAQDuSdLQJd6fEBdqb5+oX2/BzU4CxCbf8NITvtFxF4WUHhWqHUiXkhqQiN9YyptXZbiUvmb/yb2eCHra0+a3LptS4RVGpp869QMqK3qlTOO/Ua5+pgJuXiIdJrG43qxhaEhbP9Sd5CW9hTq2qZ4oFEtrDJfEgP2ElY+nkZA3WtQ/NMP2VR0oZrc11rHUx51Jl+NhQEu2T7JloPIEuyWL9bqV1vBb9ENo0U/8JtNAu+tEvqJ92asAO5IxzvilsWHJD2U/X7yBxDmzGceI6cvJmDeupkJR/kxdi3adaQvk5hTOYsNgrPxLOUXBknhyKFsfCERFXSjEm48UhSpJH5GsNz+RtLoUOm6cRg8fjn2N942175OT6tVSQLzh1/0xCVzDlOHilFAaKsO59JjWqifvvGXV6xX1HgqqliwzSjvlUfCGm3l/NCWU2VWRnQemHka0JdrJZlA1xp24U3B+tKXDFmY2Yfxxk7weDCCEjITzEZ8714tvvYiJuasYo/VgyvN8j+F2xAVEa0/Tp12rPHcwSGpUw0jTrNXc4z8eWZvWHXQBI3Mvb9mfd8zXjT0Yljd91X6kQUgBDizTB2KRWzckFfZcaMwIUoqPvCB7dWyj1qpy080AukVRJjx605OzcLEugXn6IAaoHjEx/SVb1o0vtTE7ONP39Rw360YiNIyYByKBhQ== phanidatta673.com"
+}
+
 # EC2 Instance
 resource "aws_instance" "monolith" {
   ami                    = data.aws_ami.ubuntu.id
-  instance_type          = "t2.small"
+  instance_type          = "t2.micro"
+  key_name               = aws_key_pair.deployer.key_name
   vpc_security_group_ids = [aws_security_group.web_sg.id]
   iam_instance_profile   = aws_iam_instance_profile.ec2_profile.name
-  user_data = <<-EOF
-              #!/bin/bash
-              # Force recreation comment: v1.0.4
-              exec > /home/ubuntu/userdata.log 2>&1
-            echo "Starting user_data execution..."
+  user_data = <<EOF
+#!/bin/bash
+# Force recreation comment: v1.1.0
+exec > /home/ubuntu/userdata.log 2>&1
+echo "Starting user_data execution..."
 
-            # Configure firewall
-            ufw allow 80/tcp
-            ufw allow 22/tcp
-            echo "y" | ufw enable
+# Disable firewall for initial testing
+ufw disable
 
-            # Set environment variables for the session and persistence
-            export SECRET_CODE=${var.secret_code}
-            export BUCKET_NAME=${aws_s3_bucket.uploads.id}
-            export TABLE_NAME=${aws_dynamodb_table.extractions.name}
-            export SPRITES_TOKEN=${var.sprites_token}
-            export GITHUB_TOKEN=${var.github_token}
-            export GITHUB_REPOSITORY=${var.github_owner}/${var.github_repo}
-            
-            echo "export SECRET_CODE=${var.secret_code}" >> /etc/profile
-            echo "export BUCKET_NAME=${aws_s3_bucket.uploads.id}" >> /etc/profile
-            echo "export TABLE_NAME=${aws_dynamodb_table.extractions.name}" >> /etc/profile
-            echo "export SPRITES_TOKEN=${var.sprites_token}" >> /etc/profile
-            echo "export GITHUB_TOKEN=${var.github_token}" >> /etc/profile
-            echo "export GITHUB_REPOSITORY=${var.github_owner}/${var.github_repo}" >> /etc/profile
-              
-              # Install system dependencies
-              apt-get update -y
-              apt-get install -y python3-pip git
-              
-              # Clone the repository
-              echo "Cloning repository..."
-              cd /home/ubuntu
-              git clone -b feature/text-extraction-improvements https://github.com/${var.github_owner}/${var.github_repo}.git
-              cd ${var.github_repo}/backend/monolith
-              
-              # Install Python dependencies
-              echo "Installing Python dependencies..."
-              pip3 install fastapi uvicorn boto3 pypdf python-docx python-multipart jinja2
-              
-              # Start the FastAPI app on port 80
-              echo "Starting FastAPI app..."
-              # Use full path to uvicorn if necessary
-              PYTHON_PATH=$(which uvicorn)
-              nohup uvicorn main:app --host 0.0.0.0 --port 80 > /home/ubuntu/app.log 2>&1 &
-              
-              echo "user_data execution complete."
-              EOF
+# Set environment variables for the session and persistence
+export SECRET_CODE=${var.secret_code}
+export BUCKET_NAME=${aws_s3_bucket.uploads.id}
+export TABLE_NAME=${aws_dynamodb_table.extractions.name}
+export SPRITES_TOKEN=${var.sprites_token}
+export GITHUB_TOKEN=${var.github_token}
+export GITHUB_REPOSITORY="${var.github_owner}/${var.github_repo}"
+export AWS_DEFAULT_REGION=${var.region}
+
+echo "export SECRET_CODE=${var.secret_code}" >> /etc/profile
+echo "export BUCKET_NAME=${aws_s3_bucket.uploads.id}" >> /etc/profile
+echo "export TABLE_NAME=${aws_dynamodb_table.extractions.name}" >> /etc/profile
+echo "export SPRITES_TOKEN=${var.sprites_token}" >> /etc/profile
+echo "export GITHUB_TOKEN=${var.github_token}" >> /etc/profile
+echo "export GITHUB_REPOSITORY=${var.github_owner}/${var.github_repo}" >> /etc/profile
+echo "export AWS_DEFAULT_REGION=${var.region}" >> /etc/profile
+
+# Install system dependencies
+apt-get update -y
+apt-get install -y python3-pip git
+
+# Clone the repository
+echo "Cloning repository..."
+cd /home/ubuntu
+git clone -b feature/text-extraction-improvements https://${var.github_token}@github.com/${var.github_owner}/${var.github_repo}.git
+cd ${var.github_repo}/backend/monolith
+
+# Install Python dependencies
+echo "Installing Python dependencies..."
+pip3 install fastapi uvicorn boto3 pypdf python-docx python-multipart jinja2
+
+# Create a systemd service for the FastAPI app
+echo "Creating systemd service..."
+cat <<EOT > /etc/systemd/system/textractor.service
+[Unit]
+Description=Textractor FastAPI Monolith
+After=network.target
+
+[Service]
+User=root
+WorkingDirectory=/home/ubuntu/${var.github_repo}/backend/monolith
+Environment="SECRET_CODE=${var.secret_code}"
+Environment="BUCKET_NAME=${aws_s3_bucket.uploads.id}"
+Environment="TABLE_NAME=${aws_dynamodb_table.extractions.name}"
+Environment="SPRITES_TOKEN=${var.sprites_token}"
+Environment="GITHUB_TOKEN=${var.github_token}"
+Environment="GITHUB_REPOSITORY=${var.github_owner}/${var.github_repo}"
+Environment="AWS_DEFAULT_REGION=${var.region}"
+ExecStart=/usr/bin/python3 -m uvicorn main:app --host 0.0.0.0 --port 80
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+EOT
+
+# Start and enable the service
+echo "Starting service..."
+systemctl daemon-reload
+systemctl enable textractor
+systemctl start textractor
+
+echo "user_data execution complete."
+EOF
 
   user_data_replace_on_change = true
 
