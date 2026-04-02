@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Header, HTTPException, Depends, BackgroundTasks, Body
+from fastapi import FastAPI, Header, HTTPException, Depends, BackgroundTasks, Body, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -135,46 +135,31 @@ async def process_extraction(bucket: str, key: str, file_id: str):
 async def health_check():
     return {"status": "healthy"}
 
-@app.post("/api/presigned-url", dependencies=[Depends(verify_secret)])
-async def get_presigned_url(body: dict = Body(...)):
-    filename = body.get('filename')
-    content_type = body.get('contentType')
-
-    if not filename or not content_type:
-        raise HTTPException(status_code=400, detail="Missing filename or contentType")
-
+@app.post("/api/process", dependencies=[Depends(verify_secret)])
+async def process_file(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...)
+):
     file_id = str(uuid.uuid4())
+    filename = file.filename
     extension = filename.split('.')[-1] if '.' in filename else ''
     key = f"uploads/{file_id}.{extension}" if extension else f"uploads/{file_id}"
-
+    
+    # Read file content
+    content = await file.read()
+    
+    # Upload to S3
     try:
-        upload_url = s3_client.generate_presigned_url(
-            'put_object',
-            Params={
-                'Bucket': BUCKET_NAME,
-                'Key': key,
-                'ContentType': content_type
-            },
-            ExpiresIn=3600
+        s3_client.put_object(
+            Bucket=BUCKET_NAME,
+            Key=key,
+            Body=content,
+            ContentType=file.content_type
         )
-        return {
-            'uploadUrl': upload_url,
-            'fileId': file_id,
-            'key': key
-        }
     except ClientError as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"S3 Upload failed: {str(e)}")
 
-@app.post("/api/start", dependencies=[Depends(verify_secret)])
-async def start_extraction(background_tasks: BackgroundTasks, body: dict = Body(...)):
-    file_id = body.get('fileId')
-    key = body.get('key')
-    bucket = body.get('bucket') or BUCKET_NAME
-
-    if not file_id or not key or not bucket:
-        raise HTTPException(status_code=400, detail="Missing fileId, key, or bucket")
-
-    # Initial status update
+    # Initial status update in DynamoDB
     try:
         table = dynamodb.Table(TABLE_NAME)
         table.put_item(
@@ -182,19 +167,24 @@ async def start_extraction(background_tasks: BackgroundTasks, body: dict = Body(
                 'fileId': file_id,
                 'status': 'PENDING',
                 'updatedAt': datetime.utcnow().isoformat(),
-                'ttl': int(time.time()) + 3600
+                'ttl': int(time.time()) + 3600,
+                'filename': filename
             }
         )
     except Exception as e:
         print(f"Error putting initial item: {e}")
+        # Even if DynamoDB fails, we've uploaded to S3. 
+        # But for monolith consistency we might want to fail here.
+        raise HTTPException(status_code=500, detail=f"Database initialization failed: {str(e)}")
 
     # Add background task
-    background_tasks.add_task(process_extraction, bucket, key, file_id)
+    background_tasks.add_task(process_extraction, BUCKET_NAME, key, file_id)
 
     return {'message': 'Extraction started', 'fileId': file_id}
 
 @app.get("/api/status/{file_id}")
 async def get_status(file_id: str):
+
     try:
         table = dynamodb.Table(TABLE_NAME)
         response = table.get_item(Key={'fileId': file_id})
