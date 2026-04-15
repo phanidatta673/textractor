@@ -81,8 +81,8 @@ FORMAT:
             "contents": [{"parts": [{"text": prompt}]}]
         }
         
-        max_retries = 5
-        base_delay = 5 # seconds
+        max_retries = 10
+        base_delay = 30 # seconds
         
         for attempt in range(max_retries):
             req = urllib.request.Request(url, data=json.dumps(payload).encode(), headers={"Content-Type": "application/json"})
