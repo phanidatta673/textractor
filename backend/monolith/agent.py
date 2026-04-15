@@ -74,8 +74,8 @@ FORMAT:
     def _call_gemini(self, prompt):
         print("Calling Gemini API...")
         api_key = os.environ.get("GEMINI_API_KEY")
-        # Use gemini-2.0-flash which is stable and performant
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
+        # Use stable v1 endpoint and 1.5-flash for better free-tier reliability
+        url = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={api_key}"
         
         payload = {
             "contents": [{"parts": [{"text": prompt}]}]
