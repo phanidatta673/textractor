@@ -55,3 +55,48 @@ class IssueAgent:
     def cleanup(self):
         if os.path.exists(self.workspace):
             shutil.rmtree(self.workspace)
+
+    def verify(self):
+        # Run tests in workspace
+        result = subprocess.run(["pytest", "tests/backend"], cwd=self.workspace, capture_output=True, text=True)
+        return result.returncode == 0, result.stdout
+
+    def deploy_sprite(self):
+        token = os.environ.get("SPRITES_TOKEN")
+        repo = os.environ.get("GITHUB_REPOSITORY")
+        url = "https://api.sprites.dev/v1/sandboxes"
+        
+        payload = {
+            "repository": repo,
+            "branch": self.branch_name,
+            "config": {"port": 80}
+        }
+        
+        req = urllib.request.Request(url, data=json.dumps(payload).encode(), headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json"
+        })
+        with urllib.request.urlopen(req) as res:
+            return json.loads(res.read().decode())['url']
+
+    def run(self, title, body):
+        self.prepare_workspace()
+        fix = self.get_fix(title, body)
+        
+        for path, content in fix.items():
+            full_path = os.path.join(self.workspace, path)
+            # Ensure directory exists
+            os.makedirs(os.path.dirname(full_path), exist_ok=True)
+            with open(full_path, "w") as f:
+                f.write(content)
+                
+        passed, logs = self.verify()
+        if not passed:
+            # Retry logic could go here
+            raise Exception(f"Tests failed: {logs}")
+            
+        subprocess.run(["git", "add", "."], cwd=self.workspace, check=True)
+        subprocess.run(["git", "commit", "-m", f"fix: {title}"], cwd=self.workspace, check=True)
+        subprocess.run(["git", "push", "origin", self.branch_name], cwd=self.workspace, check=True)
+        
+        return self.deploy_sprite()
