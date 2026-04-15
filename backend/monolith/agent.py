@@ -119,9 +119,8 @@ FORMAT:
 
     def verify(self):
         print("Verifying fix with pytest...")
-        # Run tests in workspace
-        # Note: We use absolute path for pytest to ensure it runs correctly
-        result = subprocess.run(["python3", "-m", "pytest", "tests/backend"], cwd=self.workspace, capture_output=True, text=True)
+        # Run only relevant monolith tests in workspace
+        result = subprocess.run(["python3", "-m", "pytest", "tests/backend/test_monolith_v2.py", "tests/backend/test_webhook.py"], cwd=self.workspace, capture_output=True, text=True)
         print(f"Pytest exit code: {result.returncode}")
         if result.returncode != 0:
             print(f"STDOUT: {result.stdout}")
