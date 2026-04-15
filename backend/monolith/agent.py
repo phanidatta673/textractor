@@ -80,30 +80,41 @@ FORMAT:
             "contents": [{"parts": [{"text": prompt}]}]
         }
         
-        req = urllib.request.Request(url, data=json.dumps(payload).encode(), headers={"Content-Type": "application/json"})
-        try:
-            with urllib.request.urlopen(req) as res:
-                response_data = json.loads(res.read().decode())
-                text = response_data['candidates'][0]['content']['parts'][0]['text']
-                print("Received response from Gemini API.")
-                
-                # Robust JSON extraction: Look for markdown blocks first
-                json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', text, re.DOTALL)
-                if json_match:
-                    json_str = json_match.group(1)
-                else:
-                    # Fallback to finding the first { and last }
-                    json_match = re.search(r'(\{.*\})', text, re.DOTALL)
+        max_retries = 5
+        base_delay = 5 # seconds
+        
+        for attempt in range(max_retries):
+            req = urllib.request.Request(url, data=json.dumps(payload).encode(), headers={"Content-Type": "application/json"})
+            try:
+                with urllib.request.urlopen(req) as res:
+                    response_data = json.loads(res.read().decode())
+                    text = response_data['candidates'][0]['content']['parts'][0]['text']
+                    print("Received response from Gemini API.")
+                    
+                    # Robust JSON extraction: Look for markdown blocks first
+                    json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', text, re.DOTALL)
                     if json_match:
                         json_str = json_match.group(1)
                     else:
-                        print(f"Raw response text: {text}")
-                        raise ValueError("Could not find JSON object in Gemini response")
-                
-                return json.loads(json_str)
-        except urllib.error.HTTPError as e:
-            print(f"Gemini API HTTP Error: {e.code} - {e.read().decode()}")
-            raise
+                        # Fallback to finding the first { and last }
+                        json_match = re.search(r'(\{.*\})', text, re.DOTALL)
+                        if json_match:
+                            json_str = json_match.group(1)
+                        else:
+                            print(f"Raw response text: {text}")
+                            raise ValueError("Could not find JSON object in Gemini response")
+                    
+                    return json.loads(json_str)
+            except urllib.error.HTTPError as e:
+                if e.code == 429:
+                    delay = base_delay * (2 ** attempt)
+                    print(f"Gemini API Rate Limit (429). Retrying in {delay}s... (Attempt {attempt+1}/{max_retries})")
+                    time.sleep(delay)
+                else:
+                    print(f"Gemini API HTTP Error: {e.code} - {e.read().decode()}")
+                    raise
+        
+        raise Exception("Failed to call Gemini API after multiple retries due to quota limits.")
 
     def verify(self):
         print("Verifying fix with pytest...")
