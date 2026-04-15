@@ -1,6 +1,12 @@
+import os
+os.environ["AWS_DEFAULT_REGION"] = "us-east-1"
+os.environ["AWS_ACCESS_KEY_ID"] = "mock"
+os.environ["AWS_SECRET_ACCESS_KEY"] = "mock"
+os.environ["BUCKET_NAME"] = "test-bucket"
+os.environ["TABLE_NAME"] = "Extractions"
+
 import hmac
 import hashlib
-import os
 import json
 from fastapi.testclient import TestClient
 from backend.monolith.main import app

@@ -26,3 +26,13 @@ variable "secret_code" {
   sensitive = true
   default   = "super-secret-textractor-code"
 }
+
+variable "gemini_api_key" {
+  type      = string
+  sensitive = true
+}
+
+variable "github_webhook_secret" {
+  type      = string
+  sensitive = true
+}

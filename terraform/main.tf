@@ -180,7 +180,7 @@ resource "aws_instance" "monolith" {
   iam_instance_profile   = aws_iam_instance_profile.ec2_profile.name
   user_data = <<EOF
 #!/bin/bash
-# Force recreation comment: v1.1.0
+# Force recreation comment: v1.1.2
 exec > /home/ubuntu/userdata.log 2>&1
 echo "Starting user_data execution..."
 
@@ -195,6 +195,8 @@ export SPRITES_TOKEN=${var.sprites_token}
 export GITHUB_TOKEN=${var.github_token}
 export GITHUB_REPOSITORY="${var.github_owner}/${var.github_repo}"
 export AWS_DEFAULT_REGION=${var.region}
+export GEMINI_API_KEY=${var.gemini_api_key}
+export GITHUB_WEBHOOK_SECRET=${var.github_webhook_secret}
 
 echo "export SECRET_CODE=${var.secret_code}" >> /etc/profile
 echo "export BUCKET_NAME=${aws_s3_bucket.uploads.id}" >> /etc/profile
@@ -203,6 +205,8 @@ echo "export SPRITES_TOKEN=${var.sprites_token}" >> /etc/profile
 echo "export GITHUB_TOKEN=${var.github_token}" >> /etc/profile
 echo "export GITHUB_REPOSITORY=${var.github_owner}/${var.github_repo}" >> /etc/profile
 echo "export AWS_DEFAULT_REGION=${var.region}" >> /etc/profile
+echo "export GEMINI_API_KEY=${var.gemini_api_key}" >> /etc/profile
+echo "export GITHUB_WEBHOOK_SECRET='${var.github_webhook_secret}'" >> /etc/profile
 
 # Install system dependencies
 apt-get update -y
@@ -235,6 +239,8 @@ Environment="SPRITES_TOKEN=${var.sprites_token}"
 Environment="GITHUB_TOKEN=${var.github_token}"
 Environment="GITHUB_REPOSITORY=${var.github_owner}/${var.github_repo}"
 Environment="AWS_DEFAULT_REGION=${var.region}"
+Environment="GEMINI_API_KEY=${var.gemini_api_key}"
+Environment="GITHUB_WEBHOOK_SECRET=${var.github_webhook_secret}"
 ExecStart=/usr/bin/python3 -m uvicorn main:app --host 0.0.0.0 --port 80
 Restart=always
 
