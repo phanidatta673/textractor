@@ -128,25 +128,62 @@ FORMAT:
         return result.returncode == 0, result.stdout
 
     def deploy_sprite(self):
-        print("Deploying to Sprite sandbox...")
+        print(f"Deploying to Sprite sandbox: {self.branch_name}...")
         token = os.environ.get("SPRITES_TOKEN")
-        repo = os.environ.get("GITHUB_REPOSITORY")
-        url = "https://api.sprites.dev/v1/sandboxes"
+        repo_full_name = os.environ.get("GITHUB_REPOSITORY") # e.g., "user/repo"
+        github_token = os.environ.get("GITHUB_TOKEN")
+        sprite_name = f"issue-fix-{self.issue_id}"
         
-        payload = {
-            "repository": repo,
-            "branch": self.branch_name,
-            "config": {"port": 80}
+        # 1. Create (or ensure) the sprite exists
+        url = f"https://api.sprites.dev/v1/sprites/{sprite_name}"
+        # We use PUT to create/update
+        create_payload = {
+            "name": sprite_name,
+            "url_settings": {"auth": "public"}
         }
         
-        req = urllib.request.Request(url, data=json.dumps(payload).encode(), headers={
+        req = urllib.request.Request(url, data=json.dumps(create_payload).encode(), headers={
             "Authorization": f"Bearer {token}",
             "Content-Type": "application/json"
-        })
-        with urllib.request.urlopen(req) as res:
-            sandbox_url = json.loads(res.read().decode())['url']
-            print(f"Deployed successfully: {sandbox_url}")
-            return sandbox_url
+        }, method='PUT')
+        
+        try:
+            with urllib.request.urlopen(req) as res:
+                print(f"Sprite {sprite_name} created/updated.")
+        except Exception as e:
+            print(f"Warning: Sprite creation might have failed or already exists: {e}")
+
+        # 2. Run setup commands in the sprite
+        exec_url = f"https://api.sprites.dev/v1/sprites/{sprite_name}/exec"
+        
+        # Commands to clone the fix branch and start the monolith
+        # Note: We use port 8080 as per Sprite docs for the public URL proxy
+        setup_commands = [
+            f"rm -rf textractor",
+            f"git clone -b {self.branch_name} https://{github_token}@github.com/{repo_full_name}.git textractor",
+            "cd textractor/backend/monolith && pip install fastapi uvicorn boto3 pypdf python-docx python-multipart jinja2",
+            # Start the monolith in the background on port 8080
+            "cd textractor/backend/monolith && nohup python3 -m uvicorn main:app --host 0.0.0.0 --port 8080 > monolith.log 2>&1 &"
+        ]
+        
+        full_command = " && ".join(setup_commands)
+        exec_payload = {"command": full_command}
+        
+        exec_req = urllib.request.Request(exec_url, data=json.dumps(exec_payload).encode(), headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json"
+        }, method='POST')
+        
+        try:
+            with urllib.request.urlopen(exec_req) as res:
+                print(f"Setup commands executed in Sprite {sprite_name}.")
+        except Exception as e:
+            print(f"Error executing setup in Sprite: {e}")
+            raise
+
+        sandbox_url = f"https://{sprite_name}.sprite.dev"
+        print(f"Deployed successfully: {sandbox_url}")
+        return sandbox_url
 
     def run(self, title, body):
         print(f"Starting agent run for issue {self.issue_id}...")
