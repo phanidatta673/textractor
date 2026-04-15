@@ -2,8 +2,8 @@ from fastapi import FastAPI, Header, HTTPException, Depends, BackgroundTasks, Bo
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
-from .utils import verify_github_signature
-from .agent import IssueAgent
+from utils import verify_github_signature
+from agent import IssueAgent
 import os
 import uuid
 import boto3
