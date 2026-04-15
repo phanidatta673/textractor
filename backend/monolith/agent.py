@@ -43,7 +43,8 @@ class IssueAgent:
     def _call_gemini(self, prompt):
         print("Calling Gemini API...")
         api_key = os.environ.get("GEMINI_API_KEY")
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key={api_key}"
+        # Use gemini-1.5-flash which is more likely to be available on free tier/standard
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
         
         payload = {
             "contents": [{"parts": [{"text": prompt}]}]
