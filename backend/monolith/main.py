@@ -1,7 +1,8 @@
-from fastapi import FastAPI, Header, HTTPException, Depends, BackgroundTasks, Body, File, UploadFile
+from fastapi import FastAPI, Header, HTTPException, Depends, BackgroundTasks, Body, File, UploadFile, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
+from .utils import verify_github_signature
 import os
 import uuid
 import boto3
@@ -26,6 +27,7 @@ app = FastAPI(title="Textractor Monolith")
 BUCKET_NAME = os.environ.get('BUCKET_NAME')
 TABLE_NAME = os.environ.get('TABLE_NAME', 'Extractions')
 SECRET_CODE = os.environ.get('SECRET_CODE', 'dev-secret') # Default for dev
+GITHUB_WEBHOOK_SECRET = os.environ.get('GITHUB_WEBHOOK_SECRET')
 
 # AWS Clients
 s3_client = boto3.client('s3')
@@ -284,6 +286,24 @@ async def get_html():
     static_dir = os.path.join(os.path.dirname(__file__), "static")
     with open(os.path.join(static_dir, "index.html"), "r") as f:
         return f.read()
+
+@app.post("/api/webhooks/github", status_code=202)
+async def github_webhook(request: Request, background_tasks: BackgroundTasks):
+    signature = request.headers.get("X-Hub-Signature-256")
+    event = request.headers.get("X-GitHub-Event")
+    payload = await request.body()
+    
+    if not verify_github_signature(payload, signature, GITHUB_WEBHOOK_SECRET):
+        raise HTTPException(status_code=403, detail="Invalid signature")
+    
+    if event == "issues":
+        data = json.loads(payload)
+        action = data.get("action")
+        if action in ["opened", "reopened"]:
+            # background_tasks.add_task(run_agent_orchestrator, data.get("issue"))
+            return {"status": "accepted"}
+            
+    return {"status": "ignored"}
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Textractor Monolith CLI")
