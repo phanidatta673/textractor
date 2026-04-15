@@ -4,6 +4,7 @@ import subprocess
 import urllib.request
 import json
 import re
+import time
 
 class IssueAgent:
     def __init__(self, issue_id):
