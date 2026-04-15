@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from .utils import verify_github_signature
+from .agent import IssueAgent
 import os
 import uuid
 import boto3
@@ -287,6 +288,32 @@ async def get_html():
     with open(os.path.join(static_dir, "index.html"), "r") as f:
         return f.read()
 
+async def run_agent_orchestrator(issue_data):
+    issue_id = issue_data.get("number")
+    title = issue_data.get("title")
+    body = issue_data.get("body")
+    
+    agent = IssueAgent(issue_id)
+    try:
+        sandbox_url = agent.run(title, body)
+        # Post comment to GitHub
+        repo = os.environ.get('GITHUB_REPOSITORY')
+        token = os.environ.get('GITHUB_TOKEN')
+        comment_url = f"https://api.github.com/repos/{repo}/issues/{issue_id}/comments"
+        comment_body = f"## 🤖 Agent Fix Deployed\n\nI've implemented a fix and verified it with tests.\n\n**Sandbox URL:** {sandbox_url}\n**Branch:** `issue-fix-{issue_id}`"
+        
+        data = json.dumps({"body": comment_body}).encode('utf-8')
+        req = urllib.request.Request(comment_url, data=data, headers={
+            'Authorization': f'token {token}',
+            'Content-Type': 'application/json',
+            'User-Agent': 'Textractor-Agent'
+        }, method='POST')
+        urllib.request.urlopen(req)
+    except Exception as e:
+        print(f"Agent failed for issue {issue_id}: {e}")
+    finally:
+        agent.cleanup()
+
 @app.post("/api/webhooks/github", status_code=202)
 async def github_webhook(request: Request, background_tasks: BackgroundTasks):
     signature = request.headers.get("X-Hub-Signature-256")
@@ -300,7 +327,7 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks):
         data = json.loads(payload)
         action = data.get("action")
         if action in ["opened", "reopened"]:
-            # background_tasks.add_task(run_agent_orchestrator, data.get("issue"))
+            background_tasks.add_task(run_agent_orchestrator, data.get("issue"))
             return {"status": "accepted"}
             
     return {"status": "ignored"}

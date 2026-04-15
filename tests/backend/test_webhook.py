@@ -1,6 +1,7 @@
 import hmac
 import hashlib
 import os
+import json
 from fastapi.testclient import TestClient
 from backend.monolith.main import app
 from backend.monolith.utils import verify_github_signature
@@ -22,8 +23,19 @@ def test_github_webhook_endpoint_no_signature():
 
 def test_github_webhook_endpoint_valid_issue(monkeypatch):
     import backend.monolith.main as main_module
+    
+    # Mock run_agent_orchestrator
+    called_with = None
+    async def mock_run_agent_orchestrator(issue_data):
+        nonlocal called_with
+        called_with = issue_data
+    
+    monkeypatch.setattr(main_module, "run_agent_orchestrator", mock_run_agent_orchestrator)
     monkeypatch.setattr(main_module, "GITHUB_WEBHOOK_SECRET", "test-secret")
-    payload = b'{"action": "opened", "issue": {"number": 123}}'
+    
+    issue_payload = {"number": 123}
+    payload = json.dumps({"action": "opened", "issue": issue_payload}).encode()
+    
     import hmac, hashlib
     sig = "sha256=" + hmac.new(b"test-secret", payload, hashlib.sha256).hexdigest()
     
@@ -34,3 +46,8 @@ def test_github_webhook_endpoint_valid_issue(monkeypatch):
     )
     assert response.status_code == 202
     assert response.json() == {"status": "accepted"}
+    
+    # Check if background task was added. 
+    # Since it's a background task, we need to wait for it or use a mock that tracks it.
+    # Actually, in FastAPI TestClient, background tasks are executed after the response.
+    assert called_with == issue_payload
