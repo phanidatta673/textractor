@@ -74,8 +74,8 @@ FORMAT:
     def _call_gemini(self, prompt):
         print("Calling Gemini API...")
         api_key = os.environ.get("GEMINI_API_KEY")
-        # Use stable v1 endpoint and 1.5-flash for better free-tier reliability
-        url = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={api_key}"
+        # Use v1beta endpoint for 1.5-pro
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key={api_key}"
         
         payload = {
             "contents": [{"parts": [{"text": prompt}]}]
@@ -176,4 +176,27 @@ FORMAT:
         subprocess.run(["git", "commit", "-m", f"fix: {title}"], cwd=self.workspace, check=True, capture_output=True)
         subprocess.run(["git", "push", "origin", self.branch_name, "--force"], cwd=self.workspace, check=True, capture_output=True)
         
+        # Create Pull Request
+        print("Creating Pull Request...")
+        repo = os.environ.get('GITHUB_REPOSITORY')
+        token = os.environ.get('GITHUB_TOKEN')
+        pr_url = f"https://api.github.com/repos/{repo}/pulls"
+        pr_payload = {
+            "title": f"fix: {title}",
+            "body": f"Automatically generated fix for issue #{self.issue_id}.\n\n{body}",
+            "head": self.branch_name,
+            "base": "feature/text-extraction-improvements"
+        }
+        pr_req = urllib.request.Request(pr_url, data=json.dumps(pr_payload).encode(), headers={
+            'Authorization': f'token {token}',
+            'Accept': 'application/vnd.github.v3+json',
+            'Content-Type': 'application/json'
+        }, method='POST')
+        try:
+            with urllib.request.urlopen(pr_req) as pr_res:
+                pr_data = json.loads(pr_res.read().decode())
+                print(f"Created PR: {pr_data['html_url']}")
+        except Exception as e:
+            print(f"Failed to create PR (might already exist): {e}")
+
         return self.deploy_sprite()
