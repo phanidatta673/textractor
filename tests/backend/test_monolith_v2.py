@@ -21,6 +21,11 @@ def test_health_check():
     assert response.status_code == 200
     assert response.json() == {"status": "healthy"}
 
+def test_root_path():
+    response = client.get("/")
+    assert response.status_code == 200
+    assert "Text Extractor Dashboard" in response.text
+
 @patch("backend.monolith.main.s3_client")
 @patch("backend.monolith.main.dynamodb")
 def test_process_endpoint_success(mock_dynamo, mock_s3):

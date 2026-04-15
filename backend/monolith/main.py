@@ -2,8 +2,12 @@ from fastapi import FastAPI, Header, HTTPException, Depends, BackgroundTasks, Bo
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
-from utils import verify_github_signature
-from agent import IssueAgent
+try:
+    from backend.monolith.utils import verify_github_signature
+    from backend.monolith.agent import IssueAgent
+except ImportError:
+    from utils import verify_github_signature
+    from agent import IssueAgent
 import os
 import uuid
 import boto3
@@ -282,6 +286,7 @@ async def get_status(file_id: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/", response_class=HTMLResponse)
 @app.get("/html", response_class=HTMLResponse)
 async def get_html():
     static_dir = os.path.join(os.path.dirname(__file__), "static")
