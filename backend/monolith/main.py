@@ -288,14 +288,20 @@ async def get_html():
     with open(os.path.join(static_dir, "index.html"), "r") as f:
         return f.read()
 
+# Force line buffering for stdout to ensure logs are visible in journalctl
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(line_buffering=True)
+
 async def run_agent_orchestrator(issue_data):
     issue_id = issue_data.get("number")
     title = issue_data.get("title")
     body = issue_data.get("body")
     
+    print(f"--- Agent orchestrator started for issue {issue_id} ---")
     agent = IssueAgent(issue_id)
     try:
         sandbox_url = agent.run(title, body)
+        print(f"--- Agent successfully deployed sandbox for issue {issue_id}: {sandbox_url} ---")
         # Post comment to GitHub
         repo = os.environ.get('GITHUB_REPOSITORY')
         token = os.environ.get('GITHUB_TOKEN')
@@ -309,8 +315,11 @@ async def run_agent_orchestrator(issue_data):
             'User-Agent': 'Textractor-Agent'
         }, method='POST')
         urllib.request.urlopen(req)
+        print(f"--- Successfully commented on GitHub issue {issue_id} ---")
     except Exception as e:
-        print(f"Agent failed for issue {issue_id}: {e}")
+        print(f"--- Agent failed for issue {issue_id}: {e} ---")
+        import traceback
+        traceback.print_exc()
     finally:
         agent.cleanup()
 
